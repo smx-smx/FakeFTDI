@@ -45,8 +45,52 @@ function hex_dump($data, $newline="\n") {
 	}
 }
 
+function path_concat(string ...$parts){
+	return implode(DIRECTORY_SEPARATOR, $parts);
+}
+
+function vbs(string $code, string ...$args){
+	$tmp = tempnam(sys_get_temp_dir(), 'vbs');
+	file_put_contents($tmp, $code);
+
+	try {
+		$shArgs = [escapeshellarg($tmp)];
+		foreach($args as $a){
+			$shArgs[]= escapeshellarg($a);
+		}
+		$sArgs = implode(' ', $shArgs);
+		$output = rtrim(shell_exec("cscript //nologo //e:vbs {$sArgs}"));
+
+		return $output;
+	} finally {
+		unlink($tmp);
+	}
+}
+
+$sigrok = path_concat(__DIR__, 'sigrok-cli');
+if(PHP_OS_FAMILY === 'Windows') $sigrok .= '.exe';
+
+if(!file_exists($sigrok)){
+	if(PHP_OS_FAMILY === 'Windows'){
+		$lnk = getenv('APPDATA') . '\Microsoft\Windows\Start Menu\Programs\sigrok\sigrok-cli\sigrok command-line tool.lnk';
+		$code = <<<EOS
+		set WshShell = WScript.CreateObject("WScript.Shell")
+		set Lnk = WshShell.Createshortcut(WScript.Arguments(0))
+		WScript.Echo Lnk.WorkingDirectory
+		EOS;
+		$sigrok = vbs($code, $lnk) . DIRECTORY_SEPARATOR . 'sigrok-cli.exe';
+	} else {
+		$sigrok = rtrim(shell_exec('which sigrok-cli'));
+	}
+
+	if(!file_exists($sigrok)){
+		fwrite(STDERR, "Couldn't find sigrok-cli binary\n");
+		exit(1);
+	}
+}
+
 if($argc < 2){
-	fwrite(STDERR, "Usage: {$argv[0]} <annotations.txt>\n");
+	fwrite(STDERR, "Usage: {$argv[0]} <FakeFTDI.log>\n");
 	return 1;
 }
 
@@ -54,21 +98,27 @@ $cur_addr = 0;
 $cur_buf = '';
 $cur_mode = '';
 
-$in = fopen($argv[1], 'r');
+$cmd = escapeshellarg($sigrok)
+	. ' -i ' . escapeshellarg($argv[1])
+	. ' -I binary:numchannels=2 -C 0=SCL,1=SDA -P i2c -A i2c=addr-data';
+$in = popen($cmd, 'r');
+if(!is_resource($in)){
+	fwrite(STDERR, "failed to run sigrok-cli. command was: '{$cmd}'\n");
+	exit(1);
+}
 while(!feof($in)){
 	$line = fgets($in);
 	if($line === false) continue;
 
-	// line is locale-encoded apparently (e.g. windows-1252 for i^2c, but we don't care)
-	// as we throw away everything before ':'
-	$p = array_map('trim', explode(':', $line, 3));
-	if(count($p) < 3) continue;
+	$p = array_map('trim', explode(':', $line, 2));
+	if(count($p) < 2) continue;
 
-	list($proto, $label, $data) = $p;
+	list($proto, $data) = $p;
 	$data = strtolower($data);
 
 	$p = array_map('trim', explode(':', $data, 2));
 	if(count($p) < 1) continue;
+
 	$cmd = $p[0];
 	switch($cmd){
 		case 'start':
@@ -87,6 +137,7 @@ while(!feof($in)){
 		case 'read':
 			$cur_mode = 'R';
 			break;
+		case 'data read':
 		case 'data write':
 			$cur_buf .= $p[1];
 			break;
