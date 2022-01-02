@@ -105,6 +105,9 @@ namespace FakeFTDI
 			if (ftHandle != FAKE_HANDLE){
 				return FtResult.INVALID_HANDLE;
 			}
+			Marshal.WriteIntPtr(dwRxBytes, new IntPtr(0));
+			Marshal.WriteIntPtr(dwTxBytes, new IntPtr(0));
+			Marshal.WriteIntPtr(dwEventDWord, new IntPtr(0));
 			return FtResult.OK;
 		}
 
@@ -228,26 +231,30 @@ namespace FakeFTDI
 						byte sample = (byte)((SCL & 1) | ((SDA & 1) << 1));
 						byte[] buffer = new byte[] { sample };
 						log.BaseStream.Write(buffer, 0, 1);
-						log.Flush();
 					} else if(cmd is FTClockByteOutCommand c2) {
 						for (int i=0; i<8; i++) {
 							int b = (c2.Byte >> (7-i)) & 1;
 							ClockBit(b);
 						}
-						log.Flush();
 					} else if(cmd is FTClockBitCommand c3) {
 						int d = (c3.Value) ? 1 : 0;
 						ClockBit(d);
-						log.Flush();
+					} else if(cmd is FTClockByteInCommand c4) {
+						// write a dummy byte to the log
+						byte data = 0x00;
+						for (int i = 0; i < 8; i++) {
+							int b = (data >> (7 - i)) & 1;
+							ClockBit(b);
+						}
 					}
 				}
 			} else { 
 				log.WriteLine($"== FT_Write({nBufferSize})");
 				log.WriteLine(buf.HexDump());
 				//log.BaseStream.Write(buf, 0, buf.Length);
-				log.Flush();
 			}
 
+			log.Flush();
 			Marshal.WriteInt32(lpBytesWritten, buf.Length);
 			return FtResult.OK;
 		}
