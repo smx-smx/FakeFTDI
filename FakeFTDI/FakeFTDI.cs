@@ -189,6 +189,17 @@ namespace FakeFTDI
 			return FtResult.OK;
 		}
 
+		private static void ClockBit(int d) {
+			log.BaseStream.Write(new byte[] {
+				// set data
+				(byte)(d << 1),
+				// assert clock
+ 				(byte)((d << 1) | 1),
+				// deassert clock
+				(byte)(d << 1)
+			}, 0, 3);
+		}
+
 		[DllExport("FT_Write", CallingConvention.StdCall)]
 		public static FtResult FT_Write(
 			IntPtr ftHandle, IntPtr lpBuffer,
@@ -210,18 +221,30 @@ namespace FakeFTDI
 			}
 
 			if (USE_SIGROK) {
-				foreach (var c in commands
-					.Where(c => c is FTSetAdBusCommand)
-					.Cast<FTSetAdBusCommand>()
-				) {
-					int SCL = c.PinValues[0] ? 1 : 0;
-					int SDA = c.PinValues[1] ? 1 : 0;
-					byte sample = (byte)((SCL & 1) | ((SDA & 1) << 1));
-					byte[] buffer = new byte[] { sample };
-					log.BaseStream.Write(buffer, 0, 1);
-					log.Flush();
+				foreach (var cmd in commands) {
+					if (cmd is FTSetAdBusCommand c1) {
+						int SCL = c1.PinValues[0] ? 1 : 0;
+						int SDA = c1.PinValues[1] ? 1 : 0;
+						byte sample = (byte)((SCL & 1) | ((SDA & 1) << 1));
+						byte[] buffer = new byte[] { sample };
+						log.BaseStream.Write(buffer, 0, 1);
+						log.Flush();
+					} else if(cmd is FTClockByteOutCommand c2) {
+						log.BaseStream.Write(new byte[] {
+							0 // zero SCL and SDA
+						}, 0, 1);
+						for (int i=0; i<8; i++) {
+							int b = (c2.Byte >> (7-i)) & 1;
+							ClockBit(b);
+						}
+						log.Flush();
+					} else if(cmd is FTClockBitCommand c3) {
+						int d = (c3.Value) ? 1 : 0;
+						ClockBit(d);
+						log.Flush();
+					}
 				}
-			} else {
+			} else { 
 				log.WriteLine($"== FT_Write({nBufferSize})");
 				log.WriteLine(buf.HexDump());
 				//log.BaseStream.Write(buf, 0, buf.Length);
