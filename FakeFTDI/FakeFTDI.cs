@@ -230,9 +230,6 @@ namespace FakeFTDI
 						log.BaseStream.Write(buffer, 0, 1);
 						log.Flush();
 					} else if(cmd is FTClockByteOutCommand c2) {
-						log.BaseStream.Write(new byte[] {
-							0 // zero SCL and SDA
-						}, 0, 1);
 						for (int i=0; i<8; i++) {
 							int b = (c2.Byte >> (7-i)) & 1;
 							ClockBit(b);
